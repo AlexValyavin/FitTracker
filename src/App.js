@@ -5,7 +5,7 @@ import { doc, getDoc, setDoc, updateDoc, collection, getDocs, writeBatch, query,
 import { motion, AnimatePresence } from 'framer-motion';
 import Confetti from 'react-confetti';
 import Lottie from "lottie-react";
-import { FaCog, FaPlus, FaSignOutAlt, FaChevronRight, FaChevronLeft, FaPen, FaTrash, FaCloudUploadAlt, FaChartBar, FaFire, FaTrophy, FaUserFriends, FaCrown, FaSearch, FaGoogle, FaEnvelope, FaLock, FaUser, FaStar } from 'react-icons/fa';
+import { FaCog, FaPlus, FaSignOutAlt, FaChevronRight, FaChevronLeft, FaPen, FaTrash, FaCloudUploadAlt, FaChartBar, FaFire, FaTrophy, FaUserFriends, FaCrown, FaSearch, FaGoogle, FaEnvelope, FaLock, FaUser } from 'react-icons/fa';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import CalendarHeatmap from 'react-calendar-heatmap';
 import 'react-calendar-heatmap/dist/styles.css';
@@ -20,7 +20,6 @@ const playSuccess = () => { const a = new Audio(SUCCESS_SOUND); a.volume = 0.4; 
 const DAYS_OF_WEEK = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 const INITIAL_QUOTES_DB = [{ text: "Боль дисциплины весит граммы, а боль сожаления — тонны." }, { text: "Результаты не приходят за одну ночь. Будь терпелив." }];
 
-// РАНГИ ТЕПЕРЬ ПО XP (FitPoints)
 const RANKS = [
   { name: "Новичок", threshold: 0 }, 
   { name: "Любитель", threshold: 500 }, 
@@ -43,15 +42,13 @@ function App() {
   const [resetSent, setResetSent] = useState(false);
 
   // --- App Data ---
-  // xpPerRep - коэффициент сложности. По умолчанию 1.
-  const [exercises, setExercises] = useState([{ name: 'Отжимания', target: 50, count: 0, lifetime: 0, xpPerRep: 1 }]);
+  const [exercises, setExercises] = useState([{ name: 'Отжимания', target: 50, count: 0, lifetime: 0, xpPerRep: 1, unit: 'раз' }]);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [inputValue, setInputValue] = useState('');
   const [streak, setStreak] = useState(0);
   
-  // NEW: Total XP (FitPoints) вместо простого количества
   const [totalXP, setTotalXP] = useState(0); 
-  const [totalLifetimeCount, setTotalLifetimeCount] = useState(0); // Оставляем для статистики, но ранги по XP
+  const [totalLifetimeCount, setTotalLifetimeCount] = useState(0);
 
   // --- UI ---
   const [showCelebration, setShowCelebration] = useState(false);
@@ -74,9 +71,7 @@ function App() {
   const [allQuotes, setAllQuotes] = useState([]);
   const [historyData, setHistoryData] = useState([]);
   const [statsRange, setStatsRange] = useState('week');
-  const lastNotifiedMinute = useRef(null);
-
-  // Используем totalXP для рангов
+  
   const getCurrentRank = (xp) => RANKS.slice().reverse().find(r => xp >= r.threshold) || RANKS[0];
   const getNextRank = (xp) => RANKS.find(r => r.threshold > xp);
 
@@ -114,8 +109,6 @@ function App() {
 
     if (docSnap.exists()) {
       const data = docSnap.data();
-      
-      // Загружаем XP. Если пользователь старый и XP нет, считаем XP = totalLifetimeCount (как будто коэфф 1)
       setTotalLifetimeCount(data.totalLifetimeCount || 0);
       setTotalXP(data.totalXP !== undefined ? data.totalXP : (data.totalLifetimeCount || 0));
 
@@ -133,11 +126,11 @@ function App() {
         await updateDoc(docRef, { exercises: resetExercises, lastDate: today, streak: newStreak });
         setExercises(resetExercises); setStreak(newStreak);
       } else {
-        // Миграция данных: добавляем xpPerRep, если нет
         const loadedExercises = data.exercises.map(ex => ({
              ...ex, 
              lifetime: ex.lifetime !== undefined ? ex.lifetime : ex.count,
-             xpPerRep: ex.xpPerRep !== undefined ? ex.xpPerRep : 1
+             xpPerRep: ex.xpPerRep !== undefined ? ex.xpPerRep : 1,
+             unit: ex.unit || 'раз'
         }));
         setExercises(loadedExercises); 
         setStreak(newStreak);
@@ -145,12 +138,12 @@ function App() {
       if (data.settings) setSettings(data.settings);
     } else {
       const initialData = {
-        exercises: [{ name: 'Отжимания', target: 50, count: 0, lifetime: 0, xpPerRep: 1 }],
+        exercises: [{ name: 'Отжимания', target: 50, count: 0, lifetime: 0, xpPerRep: 1, unit: 'раз' }],
         lastDate: today,
         settings: { notify: false, times: ['10:00'], days: [] },
         streak: 0,
         totalLifetimeCount: 0,
-        totalXP: 0, // Стартуем с 0 XP
+        totalXP: 0,
         email: currentUser.email,
         displayName: currentUser.displayName || name || "Аноним"
       };
@@ -230,18 +223,13 @@ function App() {
     const num = parseInt(val); if (isNaN(num)) return;
     const upd = [...exercises];
     
-    // 1. Считаем
     const old = upd[currentIdx].count;
     upd[currentIdx].count += num;
-    
     const currentLifetime = upd[currentIdx].lifetime || 0;
     const newLifetime = currentLifetime + num;
     upd[currentIdx].lifetime = newLifetime;
 
     const newTotalCount = totalLifetimeCount + num;
-    
-    // 2. Считаем XP (FitPoints)
-    // Если xpPerRep не задан, считаем за 1
     const difficulty = upd[currentIdx].xpPerRep || 1;
     const xpGained = num * difficulty;
     const newTotalXP = totalXP + xpGained;
@@ -256,11 +244,10 @@ function App() {
         await updateDoc(doc(db, 'users', user.uid), { 
             exercises: upd, 
             totalLifetimeCount: newTotalCount,
-            totalXP: newTotalXP, // Сохраняем XP
+            totalXP: newTotalXP, 
             email: user.email, 
             displayName: user.displayName 
         });
-
         const globalStatRef = doc(db, "globalStats", `${user.uid}_${exercises[currentIdx].name}`);
         await setDoc(globalStatRef, {
             userId: user.uid,
@@ -273,18 +260,40 @@ function App() {
 
   const triggerCelebration = () => { setShowCelebration(true); playSuccess(); setTimeout(() => setShowCelebration(false), 5000); };
   
+  // --- НОВАЯ ФУНКЦИЯ ДОБАВЛЕНИЯ УПРАЖНЕНИЯ ---
+  const handleAddExercise = async (e) => {
+    e.preventDefault(); 
+    playSuccess();
+    
+    const n = e.target.name.value;
+    const t = e.target.target.value;
+    const xp = e.target.xp.value;
+    const unit = e.target.unit.value; 
+
+    const newEx = { 
+        name: n, 
+        target: parseInt(t), 
+        count: 0, 
+        lifetime: 0, 
+        xpPerRep: parseFloat(xp),
+        unit: unit 
+    };
+
+    const u = [...exercises, newEx];
+    setExercises(u); 
+    if(user) await updateDoc(doc(db, 'users', user.uid), { exercises: u }); 
+    setShowAddModal(false); 
+    setCurrentIdx(u.length - 1); 
+  };
+
   // --- УМНЫЕ КНОПКИ ---
   const getQuickButtons = () => {
     const t = exercises[currentIdx].target;
-    // Если цель маленькая (например, 10 подтягиваний), кнопки должны быть мелкими
     if (t <= 15) return [1, 3, 5];
-    // Если цель средняя (20-60), как обычно
     if (t <= 60) return [5, 10, 20];
-    // Если цель огромная (100+ приседаний), кнопки крупнее
     return [10, 25, 50];
   };
 
-  // Helpers
   const getChartData = () => {
     const days = statsRange === 'week' ? 7 : 30;
     const sliced = historyData.slice(-days);
@@ -296,13 +305,12 @@ function App() {
   };
   const getHeatmapData = () => historyData.map(d => ({ date: d.date, count: d.exercises.reduce((a, c) => a + c.count, 0) }));
 
-  // Rank Display
   const currentRank = getCurrentRank(totalXP);
   const nextRank = getNextRank(totalXP);
   const progressToNextRank = nextRank ? ((totalXP - currentRank.threshold) / (nextRank.threshold - currentRank.threshold)) * 100 : 100;
 
   if (loading) return <div className="h-screen bg-gray-900 flex items-center justify-center text-white">Загрузка...</div>;
-  if (!user) { /* ... Блок авторизации остается тем же ... */
+  if (!user) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-gray-900 text-white p-4">
         <motion.div initial={{opacity:0, scale:0.9}} animate={{opacity:1, scale:1}} className="bg-gray-800 p-8 rounded-2xl shadow-2xl w-full max-w-md border border-gray-700">
@@ -382,17 +390,51 @@ function App() {
             <circle cx="150" cy="150" r="120" stroke="#374151" strokeWidth="15" fill="transparent" />
             <circle cx="150" cy="150" r="120" stroke="#3B82F6" strokeWidth="15" fill="transparent" strokeDasharray={2 * Math.PI * 120} strokeDashoffset={strokeDashoffset} strokeLinecap="round" className="transition-all duration-1000 ease-out" />
           </svg>
-          <div className="absolute flex flex-col items-center">
-            <span className="text-5xl font-bold mb-2 tracking-tighter">{currentExercise.count} <span className="text-gray-500 text-2xl font-normal">/ {currentExercise.target}</span>
-              <button onClick={() => { playClick(); const t = prompt("Цель:", exercises[currentIdx].target); if (t) { const u = [...exercises]; u[currentIdx].target = parseInt(t); setExercises(u); updateDoc(doc(db, 'users', user.uid), { exercises: u }); } }} className="ml-2 text-sm text-gray-500 hover:text-white align-top"><FaPen /></button>
+          
+          {/* --- НОВЫЙ ДИЗАЙН ЦЕНТРА --- */}
+       {/* --- ЗАМЕНИТЬ ЭТОТ БЛОК ВНУТРИ SVG --- */}
+          <div className="absolute flex flex-col items-center justify-center pt-2">
+            
+            {/* Верхняя строка: 50 / 50 + Карандаш */}
+            <div className="flex items-baseline gap-1">
+                <span className="text-6xl font-bold text-white tracking-tighter leading-none">
+                  {currentExercise.count}
+                </span>
+                <span className="text-3xl text-gray-500 font-semibold">
+                  <span className="mx-1">/</span>{currentExercise.target}
+                </span>
+                
+                {/* Кнопка редактирования */}
+                <button 
+                    onClick={() => { 
+                        playClick(); 
+                        const t = prompt("Цель:", exercises[currentIdx].target); 
+                        if (t) { 
+                            const u = [...exercises]; 
+                            u[currentIdx].target = parseInt(t); 
+                            setExercises(u); 
+                            updateDoc(doc(db, 'users', user.uid), { exercises: u }); 
+                        } 
+                    }} 
+                    className="ml-2 text-sm text-gray-600 hover:text-white transition -translate-y-1"
+                >
+                    <FaPen />
+                </button>
+            </div>
+
+            {/* Нижняя строка: Единица измерения (РАЗ, СЕК, КГ) */}
+            <span className="text-sm text-blue-400 font-bold uppercase tracking-[0.2em] mt-2">
+                {currentExercise.unit || 'раз'}
             </span>
-            <div className="flex items-center space-x-2 mt-4">
+
+            {/* Поле ввода */}
+            <div className="flex items-center space-x-2 mt-6">
               <input type="number" value={inputValue} onChange={e => setInputValue(e.target.value)} placeholder="+0" className="w-20 bg-gray-800 text-center text-white p-3 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 shadow-inner" />
               <button onClick={() => inputValue && updateProgress(inputValue)} className="bg-blue-600 p-3 rounded-xl font-bold hover:bg-blue-500 shadow-lg active:scale-95 transition">OK</button>
             </div>
           </div>
-        </div>
-
+		  </div>
+          {/* --- КОНЕЦ БЛОКА --- */}
         {/* УМНЫЕ КНОПКИ */}
         <div className="flex gap-4">
           {getQuickButtons().map(n => (
@@ -452,19 +494,29 @@ function App() {
         {/* ADD EXERCISE MODAL */}
         {showAddModal && (
           <Modal onClose={() => setShowAddModal(false)} title="Новое упражнение">
-            <form onSubmit={e => { playSuccess(); e.preventDefault(); const n = e.target.name.value; const t = e.target.target.value; const xp = e.target.xp.value; const u = [...exercises, { name: n, target: parseInt(t), count: 0, lifetime: 0, xpPerRep: parseFloat(xp) }]; setExercises(u); updateDoc(doc(db, 'users', user.uid), { exercises: u }); setShowAddModal(false); setCurrentIdx(u.length - 1); }} className="flex flex-col gap-4">
-              <input name="name" placeholder="Название (напр. Подтягивания)" className="bg-gray-700 p-3 rounded text-white outline-none focus:ring-2 focus:ring-blue-500" required />
+            <form onSubmit={handleAddExercise} className="flex flex-col gap-4">
+              <input name="name" placeholder="Название (напр. Планка)" className="bg-gray-700 p-3 rounded text-white outline-none focus:ring-2 focus:ring-blue-500" required />
               <div className="flex gap-2">
-                 <input name="target" type="number" placeholder="Цель (раз)" className="bg-gray-700 p-3 rounded text-white outline-none focus:ring-2 focus:ring-blue-500 w-1/2" required />
-                 <input name="xp" type="number" step="0.1" placeholder="XP за раз" defaultValue="1" className="bg-gray-700 p-3 rounded text-white outline-none focus:ring-2 focus:ring-blue-500 w-1/2" required />
+                 <input name="target" type="number" placeholder="Цель" className="bg-gray-700 p-3 rounded text-white outline-none focus:ring-2 focus:ring-blue-500 w-1/3" required />
+                 
+                 {/* ВЫБОР ЕДИНИЦ */}
+                 <select name="unit" className="bg-gray-700 p-3 rounded text-white outline-none focus:ring-2 focus:ring-blue-500 w-1/3">
+                    <option value="раз">раз</option>
+                    <option value="сек">сек</option>
+                    <option value="мин">мин</option>
+                    <option value="км">км</option>
+                    <option value="кг">кг</option>
+                 </select>
+
+                 <input name="xp" type="number" step="0.1" placeholder="XP" defaultValue="1" className="bg-gray-700 p-3 rounded text-white outline-none focus:ring-2 focus:ring-blue-500 w-1/3" required />
               </div>
-              <p className="text-xs text-gray-400">Совет: 1 отжимание = 1 XP, 1 подтягивание = 3 XP</p>
+              <p className="text-xs text-gray-400">Совет: 1 отжимание = 1 XP, 1 мин планки = 5 XP</p>
               <button className="bg-blue-600 py-3 rounded font-bold hover:bg-blue-500 shadow-md">Добавить</button>
             </form>
           </Modal>
         )}
         
-        {/* SETTINGS (Остались без изменений, код сокращен для примера, но функционал тот же) */}
+        {/* SETTINGS */}
         {showSettings && (
           <Modal onClose={() => setShowSettings(false)} title="Настройки">
             <div className="flex flex-col gap-4 max-h-[70vh] overflow-y-auto custom-scrollbar pr-1">
