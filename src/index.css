@@ -1,13 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  background-color: #111827;
+  color: white;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+/* --- ТЕМНЫЙ СКРОЛЛБАР (CUSTOM SCROLLBAR) --- */
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #374151 #1f2937;
 }
+
+/* Chrome, Edge, Safari */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #1f2937; /* Цвет фона трека */
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb {
+  background-color: #4b5563; /* Цвет ползунка */
+  border-radius: 4px;
+  border: 2px solid #1f2937; /* Отступ вокруг ползунка */
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: #6b7280;
+}
+
+/* Стили для Heatmap (Календаря) */
+.react-calendar-heatmap text { font-size: 10px; fill: #9ca3af; }
+.react-calendar-heatmap .react-calendar-heatmap-rect-hover:hover { stroke: #555; stroke-width: 1px; }
+.react-calendar-heatmap .color-empty { fill: #1f2937; }
+.react-calendar-heatmap .color-scale-1 { fill: #0e4429; }
+.react-calendar-heatmap .color-scale-2 { fill: #006d32; }
+.react-calendar-heatmap .color-scale-3 { fill: #26a641; }
+.react-calendar-heatmap .color-scale-4 { fill: #39d353; }
+
+/* Кастомный класс для скрытия скролла, но сохранения функционала (если нужно) */
+.custom-scrollbar::-webkit-scrollbar { width: 6px; }
+.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background-color: #374151; border-radius: 20px; }
