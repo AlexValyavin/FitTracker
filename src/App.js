@@ -10,7 +10,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 import CalendarHeatmap from 'react-calendar-heatmap';
 import 'react-calendar-heatmap/dist/styles.css';
 
-// --- ЗВУКИ И КОНСТАНТЫ ---
+// --- ЗВУКИ ---
 const TROPHY_ANIMATION_URL = "https://assets10.lottiefiles.com/packages/lf20_touohxv0.json";
 const CLICK_SOUND = "https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3"; 
 const SUCCESS_SOUND = "https://assets.mixkit.co/active_storage/sfx/1435/1435-preview.mp3"; 
@@ -19,6 +19,19 @@ const playSuccess = () => { const a = new Audio(SUCCESS_SOUND); a.volume = 0.4; 
 
 const DAYS_OF_WEEK = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 const INITIAL_QUOTES_DB = [{ text: "Боль дисциплины весит граммы, а боль сожаления — тонны." }, { text: "Результаты не приходят за одну ночь. Будь терпелив." }];
+
+// --- БАЗА УПРАЖНЕНИЙ (Для автозаполнения) ---
+const EXERCISE_PRESETS = {
+  "отжимания": { unit: "раз", xp: 1 },
+  "приседания": { unit: "раз", xp: 1 },
+  "подтягивания": { unit: "раз", xp: 3 },
+  "планка": { unit: "сек", xp: 0.2 },
+  "бег": { unit: "км", xp: 10 },
+  "пресс": { unit: "раз", xp: 1.5 },
+  "скакалка": { unit: "раз", xp: 0.1 },
+  "бёрпи": { unit: "раз", xp: 2 },
+  "медитация": { unit: "мин", xp: 5 },
+};
 
 const RANKS = [
   { name: "Новичок", threshold: 0 }, 
@@ -56,10 +69,10 @@ function App() {
   const [showStats, setShowStats] = useState(false);
   const [showSocial, setShowSocial] = useState(false);
   
-  // --- New Exercise Logic (CROWDSOURCING) ---
+  // --- New Exercise Logic ---
   const [newExForm, setNewExForm] = useState({ name: '', target: '', xp: '1', unit: 'раз' });
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [dbSuggestions, setDbSuggestions] = useState([]); // Подсказки из базы
+  const [dbSuggestions, setDbSuggestions] = useState([]);
 
   // --- Leaderboard & Stats Logic ---
   const [leaderboard, setLeaderboard] = useState([]);
@@ -73,8 +86,12 @@ function App() {
   const [settings, setSettings] = useState({ notify: false, times: ['10:00'], days: [] });
   const [quote, setQuote] = useState("Загрузка...");
   const [allQuotes, setAllQuotes] = useState([]);
+  
+  // --- STATS STATE ---
   const [historyData, setHistoryData] = useState([]);
-  const [statsRange, setStatsRange] = useState('week');
+  const [statsRange, setStatsRange] = useState('week'); // График
+  const [heatmapRange, setHeatmapRange] = useState('short'); // Календарь ('short' | 'long')
+  const lastNotifiedMinute = useRef(null);
   
   const getCurrentRank = (xp) => RANKS.slice().reverse().find(r => xp >= r.threshold) || RANKS[0];
   const getNextRank = (xp) => RANKS.find(r => r.threshold > xp);
@@ -99,7 +116,7 @@ function App() {
       }
   }, [allQuotes]);
 
-  // --- 2. Logic (Midnight Reset) ---
+  // --- 2. Logic ---
   const checkDateAndReset = useCallback(async (forceUserCheck = null) => {
     const currentUser = forceUserCheck || user;
     if (!currentUser) return;
@@ -290,7 +307,7 @@ function App() {
     }
   };
 
-  // --- 1. SMART SEARCH (FROM FIRESTORE) ---
+  // --- SMART SEARCH (FROM FIRESTORE) ---
   const handleNameChange = async (e) => {
     const val = e.target.value;
     setNewExForm(prev => ({ ...prev, name: val }));
@@ -305,14 +322,13 @@ function App() {
 
     try {
         const lowerVal = val.toLowerCase();
-        // Ищем в общей базе (требует индекс, если его нет - база пустая, ничего не вернет)
+        // Ищем в общей базе
         const q = query(
             collection(db, "commonExercises"),
             where("__name__", ">=", lowerVal),
             where("__name__", "<=", lowerVal + "\uf8ff"),
             limit(5)
         );
-        
         const snap = await getDocs(q);
         const suggestions = snap.docs.map(d => d.data());
         setDbSuggestions(suggestions);
@@ -331,7 +347,7 @@ function App() {
       setShowSuggestions(false);
   };
 
-  // --- 2. ADD EXERCISE (SAVE TO DB) ---
+  // --- ADD EXERCISE (SAVE TO DB) ---
   const handleAddExercise = async (e) => {
     e.preventDefault(); 
     playSuccess();
@@ -349,7 +365,7 @@ function App() {
     setExercises(u); 
     if(user) await updateDoc(doc(db, 'users', user.uid), { exercises: u }); 
 
-    // СОХРАНЯЕМ В ОБЩУЮ БАЗУ (Если имя длиннее 2 символов)
+    // Сохраняем в общую базу
     if (newExForm.name.trim().length > 2) {
         try {
             const commonRef = doc(db, "commonExercises", newExForm.name.toLowerCase().trim());
@@ -369,7 +385,34 @@ function App() {
     setDbSuggestions([]);
   };
 
-  // --- УМНЫЕ КНОПКИ ---
+  // --- GET HEATMAP DATA (Fixes empty cells issue) ---
+  const getHeatmapData = () => {
+    const endDate = new Date();
+    const startDate = heatmapRange === 'short' 
+        ? new Date(new Date().setMonth(new Date().getMonth() - 3)) 
+        : new Date(new Date().setFullYear(new Date().getFullYear() - 1));
+    
+    const activityMap = {};
+    historyData.forEach(d => {
+        const dateKey = new Date(d.date).toISOString().split('T')[0];
+        activityMap[dateKey] = d.exercises.reduce((acc, curr) => acc + curr.count, 0);
+    });
+
+    const allDays = [];
+    let currentDate = new Date(startDate);
+    
+    while (currentDate <= endDate) {
+        const dateKey = currentDate.toISOString().split('T')[0];
+        allDays.push({
+            date: dateKey,
+            count: activityMap[dateKey] || 0 // Если пусто, ставим 0, но дата сохраняется!
+        });
+        currentDate.setDate(currentDate.getDate() + 1);
+    }
+    
+    return allDays;
+  };
+
   const getQuickButtons = () => {
     const t = exercises[currentIdx].target;
     if (t <= 15) return [1, 3, 5];
@@ -386,7 +429,6 @@ function App() {
       return { date: new Date(e.date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'numeric' }), count: exData ? exData.count : 0 };
     });
   };
-  const getHeatmapData = () => historyData.map(d => ({ date: d.date, count: d.exercises.reduce((a, c) => a + c.count, 0) }));
 
   const currentRank = getCurrentRank(totalXP);
   const nextRank = getNextRank(totalXP);
@@ -431,7 +473,8 @@ function App() {
           <button onClick={() => { playClick(); setShowAddModal(true) }} className="p-3 bg-gray-800 rounded-full hover:bg-gray-700 transition shadow-lg border border-gray-700"><FaPlus /></button>
           <button onClick={() => { playClick(); setShowStats(true) }} className="p-3 bg-blue-600/20 text-blue-400 rounded-full hover:bg-blue-600/40 transition shadow-lg border border-blue-900/30"><FaChartBar /></button>
           <button onClick={() => { playClick(); setShowSocial(true) }} className="p-3 bg-yellow-600/20 text-yellow-400 rounded-full hover:bg-yellow-600/40 transition relative shadow-lg border border-yellow-900/30"><FaCrown /></button>
-<div className="flex items-center gap-1 bg-gray-800/80 px-3 py-1.5 rounded-full border border-orange-500/30 shadow-lg ml-2">
+          
+          <div className="flex items-center gap-1 bg-gray-800/80 px-3 py-1.5 rounded-full border border-orange-500/30 shadow-lg ml-1">
             <FaFire className={streak > 0 ? "text-orange-500 animate-pulse" : "text-gray-600"} />
             <span className={`font-bold text-sm ${streak > 0 ? "text-orange-100" : "text-gray-500"}`}>{streak}</span>
           </div>
@@ -457,7 +500,7 @@ function App() {
            </div>
         </div>
 
-        {/* НАВИГАЦИЯ */}
+        {/* НАВИГАЦИЯ (БЕЗ КОРЗИНЫ) */}
         <div className="flex items-center justify-between w-full mb-4 relative">
           <button disabled={currentIdx === 0} onClick={() => { playClick(); setCurrentIdx(p => p - 1) }} className={`text-2xl p-2 transition ${currentIdx === 0 ? 'text-gray-700' : 'text-white hover:scale-110'}`}><FaChevronLeft /></button>
           
@@ -560,12 +603,61 @@ function App() {
         {showStats && (
           <Modal onClose={() => setShowStats(false)} title="Статистика">
             <div className="flex flex-col gap-6 overflow-y-auto max-h-[70vh] pr-2 custom-scrollbar">
+              
               <div className="bg-gray-700/50 p-3 rounded-lg flex justify-between items-center"><span className="text-sm text-gray-300">Упражнение:</span><select value={selectedStatsExercise} onChange={(e) => { playClick(); setSelectedStatsExercise(e.target.value); }} className="bg-gray-800 text-white text-sm p-2 rounded outline-none border border-gray-600">{exercises.map(ex => (<option key={ex.name} value={ex.name}>{ex.name}</option>))}</select></div>
+              
               <div className="bg-gray-700/30 p-4 rounded-xl border border-gray-600">
                 <div className="flex justify-between items-end mb-2"><div><span className="text-xs text-gray-400 uppercase">Ранг (FitPoints)</span><div className="text-2xl font-bold text-yellow-400 flex items-center gap-2"><FaTrophy /> {getCurrentRank(totalXP).name}</div></div><div className="text-right"><span className="text-xl font-bold">{Math.floor(totalXP)}</span><span className="text-xs text-gray-500 block">XP всего</span></div></div>
               </div>
+
               <div><div className="flex justify-between items-center mb-2"><h4 className="font-bold text-gray-300">График</h4><div className="flex gap-1 text-xs bg-gray-700 rounded p-1"><button onClick={() => setStatsRange('week')} className={`px-2 py-1 rounded ${statsRange === 'week' ? 'bg-blue-600' : ''}`}>7 дн</button><button onClick={() => setStatsRange('month')} className={`px-2 py-1 rounded ${statsRange === 'month' ? 'bg-blue-600' : ''}`}>30 дн</button></div></div><div className="h-48 w-full bg-gray-800/50 rounded-lg p-2"><ResponsiveContainer width="100%" height="100%"><BarChart data={getChartData()}><CartesianGrid strokeDasharray="3 3" stroke="#374151" vertical={false} /><XAxis dataKey="date" stroke="#9CA3AF" tick={{ fontSize: 10 }} /><YAxis stroke="#9CA3AF" tick={{ fontSize: 10 }} /><Tooltip contentStyle={{ backgroundColor: '#1F2937', border: 'none', borderRadius: '8px', color: '#fff' }} cursor={{ fill: '#374151', opacity: 0.4 }} /><Bar dataKey="count" fill="#3B82F6" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></div></div>
-              <div><h4 className="font-bold text-gray-300 mb-2">Общая активность (Год)</h4><div className="bg-gray-800/50 p-2 rounded-lg overflow-x-auto"><div className="min-w-[500px]"><CalendarHeatmap startDate={new Date(new Date().setFullYear(new Date().getFullYear() - 1))} endDate={new Date()} values={getHeatmapData()} classForValue={(value) => { if (!value || value.count === 0) return 'color-empty'; if (value.count < 20) return 'color-scale-1'; if (value.count < 50) return 'color-scale-2'; if (value.count < 100) return 'color-scale-3'; return 'color-scale-4'; }} showWeekdayLabels={true} /></div></div></div>
+              
+              {/* КАЛЕНДАРЬ С КРУПНЫМИ ЧИСЛАМИ */}
+              <div>
+                  <div className="flex justify-between items-center mb-2">
+                      <h4 className="font-bold text-gray-300">Активность</h4>
+                      <div className="flex gap-1 text-xs bg-gray-700 rounded p-1">
+                          <button onClick={() => setHeatmapRange('short')} className={`px-2 py-1 rounded ${heatmapRange === 'short' ? 'bg-blue-600' : ''}`}>3 мес</button>
+                          <button onClick={() => setHeatmapRange('long')} className={`px-2 py-1 rounded ${heatmapRange === 'long' ? 'bg-blue-600' : ''}`}>1 год</button>
+                      </div>
+                  </div>
+                  <div className="bg-gray-800/50 p-2 rounded-lg overflow-x-auto">
+                      <div className={heatmapRange === 'long' ? "min-w-[600px]" : "w-full"}>
+                          <CalendarHeatmap 
+                              startDate={heatmapRange === 'short' ? new Date(new Date().setMonth(new Date().getMonth() - 3)) : new Date(new Date().setFullYear(new Date().getFullYear() - 1))} 
+                              endDate={new Date()} 
+                              values={getHeatmapData()} 
+                              classForValue={(value) => { if (!value || value.count === 0) return 'color-empty'; if (value.count < 20) return 'color-scale-1'; if (value.count < 50) return 'color-scale-2'; if (value.count < 100) return 'color-scale-3'; return 'color-scale-4'; }} 
+                              showWeekdayLabels={true} 
+                              
+                              // ЧИСЛА ПОВЕРХ КВАДРАТОВ
+                              transformDayElement={(element, value, index) => {
+                                  const date = new Date(value.date);
+                                  const dayNumber = date.getDate();
+                                  const { x, y } = element.props;
+                                  const width = element.props.width || 10;
+                                  const height = element.props.height || 10;
+                                  const textColor = value.count > 0 ? 'rgba(0,0,0,0.6)' : '#4B5563';
+
+                                  return (
+                                      <g key={index}>
+                                          {element}
+                                          <text
+                                              x={x + width / 2}
+                                              y={y + height / 1.4}
+                                              textAnchor="middle"
+                                              style={{ fontSize: '5px', fill: textColor, fontWeight: '900', pointerEvents: 'none', userSelect: 'none' }}
+                                          >
+                                              {dayNumber}
+                                          </text>
+                                      </g>
+                                  );
+                              }}
+                          />
+                      </div>
+                  </div>
+              </div>
+
             </div>
           </Modal>
         )}
