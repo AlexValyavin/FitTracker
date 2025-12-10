@@ -10,7 +10,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 import CalendarHeatmap from 'react-calendar-heatmap';
 import 'react-calendar-heatmap/dist/styles.css';
 
-// --- ЗВУКИ ---
+// --- ЗВУКИ И КОНСТАНТЫ ---
 const TROPHY_ANIMATION_URL = "https://assets10.lottiefiles.com/packages/lf20_touohxv0.json";
 const CLICK_SOUND = "https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3"; 
 const SUCCESS_SOUND = "https://assets.mixkit.co/active_storage/sfx/1435/1435-preview.mp3"; 
@@ -46,7 +46,6 @@ function App() {
   const [currentIdx, setCurrentIdx] = useState(0);
   const [inputValue, setInputValue] = useState('');
   const [streak, setStreak] = useState(0);
-  
   const [totalXP, setTotalXP] = useState(0); 
   const [totalLifetimeCount, setTotalLifetimeCount] = useState(0);
 
@@ -57,6 +56,11 @@ function App() {
   const [showStats, setShowStats] = useState(false);
   const [showSocial, setShowSocial] = useState(false);
   
+  // --- New Exercise Logic (CROWDSOURCING) ---
+  const [newExForm, setNewExForm] = useState({ name: '', target: '', xp: '1', unit: 'раз' });
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [dbSuggestions, setDbSuggestions] = useState([]); // Подсказки из базы
+
   // --- Leaderboard & Stats Logic ---
   const [leaderboard, setLeaderboard] = useState([]);
   const [selectedLeaderboardExercise, setSelectedLeaderboardExercise] = useState('Отжимания');
@@ -95,7 +99,7 @@ function App() {
       }
   }, [allQuotes]);
 
-  // --- 2. Logic ---
+  // --- 2. Logic (Midnight Reset) ---
   const checkDateAndReset = useCallback(async (forceUserCheck = null) => {
     const currentUser = forceUserCheck || user;
     if (!currentUser) return;
@@ -260,30 +264,109 @@ function App() {
 
   const triggerCelebration = () => { setShowCelebration(true); playSuccess(); setTimeout(() => setShowCelebration(false), 5000); };
   
-  // --- НОВАЯ ФУНКЦИЯ ДОБАВЛЕНИЯ УПРАЖНЕНИЯ ---
+  // --- DELETE EXERCISE (from Settings) ---
+  const handleDeleteExercise = async (indexToDelete) => {
+    if (exercises.length <= 1) {
+      alert("Нельзя удалить единственное упражнение!");
+      return;
+    }
+    if (!window.confirm(`Удалить упражнение "${exercises[indexToDelete].name}"?`)) return;
+
+    playClick();
+    const updatedExercises = exercises.filter((_, index) => index !== indexToDelete);
+    
+    let newIdx = currentIdx;
+    if (indexToDelete === currentIdx) {
+        newIdx = currentIdx > 0 ? currentIdx - 1 : 0;
+    } else if (indexToDelete < currentIdx) {
+        newIdx = currentIdx - 1;
+    }
+    
+    setExercises(updatedExercises);
+    setCurrentIdx(newIdx);
+
+    if (user) {
+      await updateDoc(doc(db, 'users', user.uid), { exercises: updatedExercises });
+    }
+  };
+
+  // --- 1. SMART SEARCH (FROM FIRESTORE) ---
+  const handleNameChange = async (e) => {
+    const val = e.target.value;
+    setNewExForm(prev => ({ ...prev, name: val }));
+
+    if (val.length < 2) {
+        setDbSuggestions([]);
+        setShowSuggestions(false);
+        return;
+    }
+
+    setShowSuggestions(true);
+
+    try {
+        const lowerVal = val.toLowerCase();
+        // Ищем в общей базе (требует индекс, если его нет - база пустая, ничего не вернет)
+        const q = query(
+            collection(db, "commonExercises"),
+            where("__name__", ">=", lowerVal),
+            where("__name__", "<=", lowerVal + "\uf8ff"),
+            limit(5)
+        );
+        
+        const snap = await getDocs(q);
+        const suggestions = snap.docs.map(d => d.data());
+        setDbSuggestions(suggestions);
+    } catch (error) {
+        console.error("Search error (Need Rules update):", error);
+    }
+  };
+
+  const selectPreset = (preset) => {
+      setNewExForm({
+          name: preset.name,
+          target: newExForm.target,
+          unit: preset.unit,
+          xp: preset.xp
+      });
+      setShowSuggestions(false);
+  };
+
+  // --- 2. ADD EXERCISE (SAVE TO DB) ---
   const handleAddExercise = async (e) => {
     e.preventDefault(); 
     playSuccess();
     
-    const n = e.target.name.value;
-    const t = e.target.target.value;
-    const xp = e.target.xp.value;
-    const unit = e.target.unit.value; 
-
     const newEx = { 
-        name: n, 
-        target: parseInt(t), 
+        name: newExForm.name, 
+        target: parseInt(newExForm.target), 
         count: 0, 
         lifetime: 0, 
-        xpPerRep: parseFloat(xp),
-        unit: unit 
+        xpPerRep: parseFloat(newExForm.xp), 
+        unit: newExForm.unit 
     };
 
     const u = [...exercises, newEx];
     setExercises(u); 
     if(user) await updateDoc(doc(db, 'users', user.uid), { exercises: u }); 
+
+    // СОХРАНЯЕМ В ОБЩУЮ БАЗУ (Если имя длиннее 2 символов)
+    if (newExForm.name.trim().length > 2) {
+        try {
+            const commonRef = doc(db, "commonExercises", newExForm.name.toLowerCase().trim());
+            await setDoc(commonRef, {
+                name: newExForm.name, 
+                unit: newExForm.unit,
+                xp: parseFloat(newExForm.xp)
+            }); 
+        } catch (error) {
+            console.error("CommonDB save error:", error);
+        }
+    }
+
     setShowAddModal(false); 
-    setCurrentIdx(u.length - 1); 
+    setCurrentIdx(u.length - 1);
+    setNewExForm({ name: '', target: '', xp: '1', unit: 'раз' });
+    setDbSuggestions([]);
   };
 
   // --- УМНЫЕ КНОПКИ ---
@@ -374,14 +457,17 @@ function App() {
            </div>
         </div>
 
-        <div className="flex items-center justify-between w-full mb-4">
+        {/* НАВИГАЦИЯ */}
+        <div className="flex items-center justify-between w-full mb-4 relative">
           <button disabled={currentIdx === 0} onClick={() => { playClick(); setCurrentIdx(p => p - 1) }} className={`text-2xl p-2 transition ${currentIdx === 0 ? 'text-gray-700' : 'text-white hover:scale-110'}`}><FaChevronLeft /></button>
+          
           <div className="flex flex-col items-center">
              <h2 className="text-2xl font-bold">{currentExercise.name}</h2>
              <span className="text-xs text-blue-400 bg-blue-900/20 px-2 py-0.5 rounded-full border border-blue-900/50">
                 {currentExercise.xpPerRep || 1} XP за раз
              </span>
           </div>
+
           <button disabled={currentIdx === exercises.length - 1} onClick={() => { playClick(); setCurrentIdx(p => p + 1) }} className={`text-2xl p-2 transition ${currentIdx === exercises.length - 1 ? 'text-gray-700' : 'text-white hover:scale-110'}`}><FaChevronRight /></button>
         </div>
 
@@ -391,11 +477,8 @@ function App() {
             <circle cx="150" cy="150" r="120" stroke="#3B82F6" strokeWidth="15" fill="transparent" strokeDasharray={2 * Math.PI * 120} strokeDashoffset={strokeDashoffset} strokeLinecap="round" className="transition-all duration-1000 ease-out" />
           </svg>
           
-          {/* --- НОВЫЙ ДИЗАЙН ЦЕНТРА --- */}
-       {/* --- ЗАМЕНИТЬ ЭТОТ БЛОК ВНУТРИ SVG --- */}
+          {/* --- ЦИФРЫ В ЦЕНТРЕ --- */}
           <div className="absolute flex flex-col items-center justify-center pt-2">
-            
-            {/* Верхняя строка: 50 / 50 + Карандаш */}
             <div className="flex items-baseline gap-1">
                 <span className="text-6xl font-bold text-white tracking-tighter leading-none">
                   {currentExercise.count}
@@ -403,8 +486,6 @@ function App() {
                 <span className="text-3xl text-gray-500 font-semibold">
                   <span className="mx-1">/</span>{currentExercise.target}
                 </span>
-                
-                {/* Кнопка редактирования */}
                 <button 
                     onClick={() => { 
                         playClick(); 
@@ -422,19 +503,17 @@ function App() {
                 </button>
             </div>
 
-            {/* Нижняя строка: Единица измерения (РАЗ, СЕК, КГ) */}
             <span className="text-sm text-blue-400 font-bold uppercase tracking-[0.2em] mt-2">
                 {currentExercise.unit || 'раз'}
             </span>
 
-            {/* Поле ввода */}
             <div className="flex items-center space-x-2 mt-6">
               <input type="number" value={inputValue} onChange={e => setInputValue(e.target.value)} placeholder="+0" className="w-20 bg-gray-800 text-center text-white p-3 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 shadow-inner" />
               <button onClick={() => inputValue && updateProgress(inputValue)} className="bg-blue-600 p-3 rounded-xl font-bold hover:bg-blue-500 shadow-lg active:scale-95 transition">OK</button>
             </div>
           </div>
-		  </div>
-          {/* --- КОНЕЦ БЛОКА --- */}
+        </div>
+
         {/* УМНЫЕ КНОПКИ */}
         <div className="flex gap-4">
           {getQuickButtons().map(n => (
@@ -491,16 +570,63 @@ function App() {
           </Modal>
         )}
 
-        {/* ADD EXERCISE MODAL */}
+        {/* ADD EXERCISE MODAL (SMART FORM) */}
         {showAddModal && (
           <Modal onClose={() => setShowAddModal(false)} title="Новое упражнение">
-            <form onSubmit={handleAddExercise} className="flex flex-col gap-4">
-              <input name="name" placeholder="Название (напр. Планка)" className="bg-gray-700 p-3 rounded text-white outline-none focus:ring-2 focus:ring-blue-500" required />
-              <div className="flex gap-2">
-                 <input name="target" type="number" placeholder="Цель" className="bg-gray-700 p-3 rounded text-white outline-none focus:ring-2 focus:ring-blue-500 w-1/3" required />
+            <form onSubmit={handleAddExercise} className="flex flex-col gap-4 relative">
+              
+              {/* Поле Названия + Выпадающий список */}
+              <div className="relative">
+                  <input 
+                    name="name" 
+                    value={newExForm.name}
+                    onChange={(e) => { handleNameChange(e); setShowSuggestions(true); }}
+                    onFocus={() => setShowSuggestions(true)}
+                    autoComplete="off" 
+                    placeholder="Название (начни вводить 'Планка'...)" 
+                    className="w-full bg-gray-700 p-3 rounded text-white outline-none focus:ring-2 focus:ring-blue-500" 
+                    required 
+                  />
+                  
+                  {/* Красивый список подсказок ИЗ БАЗЫ */}
+                  {showSuggestions && dbSuggestions.length > 0 && (
+                      <ul className="absolute z-50 w-full bg-gray-800 border border-gray-600 rounded-b-lg shadow-xl max-h-40 overflow-y-auto mt-1">
+                          {dbSuggestions.map((preset, idx) => (
+                                <li 
+                                    key={idx} 
+                                    onClick={() => selectPreset(preset)}
+                                    className="p-3 hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-0 flex justify-between items-center"
+                                >
+                                    <span className="capitalize font-bold text-white">{preset.name}</span>
+                                    <span className="text-xs text-blue-300 bg-blue-900/30 px-2 py-1 rounded">
+                                        {preset.unit}, {preset.xp} XP
+                                    </span>
+                                </li>
+                             ))
+                          }
+                      </ul>
+                  )}
+                  {/* Подложка */}
+                  {showSuggestions && <div className="fixed inset-0 z-40" onClick={() => setShowSuggestions(false)}></div>}
+              </div>
+
+              <div className="flex gap-2 relative z-0">
+                 <input 
+                    name="target" 
+                    type="number" 
+                    value={newExForm.target}
+                    onChange={e => setNewExForm({...newExForm, target: e.target.value})}
+                    placeholder="Цель" 
+                    className="bg-gray-700 p-3 rounded text-white outline-none focus:ring-2 focus:ring-blue-500 w-1/3" 
+                    required 
+                 />
                  
-                 {/* ВЫБОР ЕДИНИЦ */}
-                 <select name="unit" className="bg-gray-700 p-3 rounded text-white outline-none focus:ring-2 focus:ring-blue-500 w-1/3">
+                 <select 
+                    name="unit" 
+                    value={newExForm.unit}
+                    onChange={e => setNewExForm({...newExForm, unit: e.target.value})}
+                    className="bg-gray-700 p-3 rounded text-white outline-none focus:ring-2 focus:ring-blue-500 w-1/3"
+                 >
                     <option value="раз">раз</option>
                     <option value="сек">сек</option>
                     <option value="мин">мин</option>
@@ -508,18 +634,45 @@ function App() {
                     <option value="кг">кг</option>
                  </select>
 
-                 <input name="xp" type="number" step="0.1" placeholder="XP" defaultValue="1" className="bg-gray-700 p-3 rounded text-white outline-none focus:ring-2 focus:ring-blue-500 w-1/3" required />
+                 <input 
+                    name="xp" 
+                    type="number" 
+                    step="0.1" 
+                    value={newExForm.xp}
+                    onChange={e => setNewExForm({...newExForm, xp: e.target.value})}
+                    placeholder="XP" 
+                    className="bg-gray-700 p-3 rounded text-white outline-none focus:ring-2 focus:ring-blue-500 w-1/3" 
+                    required 
+                 />
               </div>
               <p className="text-xs text-gray-400">Совет: 1 отжимание = 1 XP, 1 мин планки = 5 XP</p>
-              <button className="bg-blue-600 py-3 rounded font-bold hover:bg-blue-500 shadow-md">Добавить</button>
+              <button className="bg-blue-600 py-3 rounded font-bold hover:bg-blue-500 shadow-md relative z-0">Добавить</button>
             </form>
           </Modal>
         )}
         
-        {/* SETTINGS */}
+        {/* SETTINGS (С УДАЛЕНИЕМ) */}
         {showSettings && (
           <Modal onClose={() => setShowSettings(false)} title="Настройки">
             <div className="flex flex-col gap-4 max-h-[70vh] overflow-y-auto custom-scrollbar pr-1">
+              
+              {/* БЛОК УДАЛЕНИЯ УПРАЖНЕНИЙ */}
+              <div className="bg-gray-700/30 p-3 rounded-lg border border-gray-600">
+                  <h4 className="text-xs text-gray-400 uppercase font-bold mb-2">Мои упражнения</h4>
+                  <div className="flex flex-col gap-2">
+                      {exercises.map((ex, idx) => (
+                          <div key={idx} className="flex justify-between items-center bg-gray-800 p-2 rounded text-sm">
+                              <span>{ex.name}</span>
+                              {exercises.length > 1 && (
+                                  <button onClick={() => handleDeleteExercise(idx)} className="text-red-400 hover:text-red-300 p-1">
+                                      <FaTrash />
+                                  </button>
+                              )}
+                          </div>
+                      ))}
+                  </div>
+              </div>
+
               <button onClick={() => { playClick(); if (window.confirm("Обновить?")) { const b = writeBatch(db); INITIAL_QUOTES_DB.forEach(q => b.set(doc(collection(db, "quotes")), q)); b.commit(); window.location.reload(); } }} className="flex justify-between items-center bg-gray-700 p-3 rounded hover:bg-gray-600"><span className="text-sm">Сброс цитат</span><FaCloudUploadAlt /></button>
               <div className="flex justify-between items-center pt-2 border-t border-gray-700"><span className="font-bold">Уведомления</span><input type="checkbox" checked={settings.notify} onChange={e => { playClick(); if (e.target.checked && Notification.permission !== 'granted') Notification.requestPermission(); const s = { ...settings, notify: e.target.checked }; setSettings(s); updateDoc(doc(db, 'users', user.uid), { settings: s }) }} className="w-5 h-5 accent-blue-600" /></div>
               {settings.notify && (<div className="bg-gray-700/50 p-3 rounded flex flex-col gap-2">{settings.times.map((t, i) => <div key={i} className="flex gap-2"><input type="time" value={t} onChange={e => { const n = [...settings.times]; n[i] = e.target.value; const s = { ...settings, times: n }; setSettings(s); updateDoc(doc(db, 'users', user.uid), { settings: s }) }} className="bg-gray-700 p-1 rounded text-white w-full" /></div>)}<button onClick={() => { playClick(); const s = { ...settings, times: [...settings.times, '12:00'] }; setSettings(s); updateDoc(doc(db, 'users', user.uid), { settings: s }) }} className="text-blue-400 text-xs flex items-center gap-1 mt-1"><FaPlus /> Добавить время</button></div>)}
