@@ -431,7 +431,7 @@ function App() {
           <button onClick={() => { playClick(); setShowAddModal(true) }} className="p-3 bg-gray-800 rounded-full hover:bg-gray-700 transition shadow-lg border border-gray-700"><FaPlus /></button>
           <button onClick={() => { playClick(); setShowStats(true) }} className="p-3 bg-blue-600/20 text-blue-400 rounded-full hover:bg-blue-600/40 transition shadow-lg border border-blue-900/30"><FaChartBar /></button>
           <button onClick={() => { playClick(); setShowSocial(true) }} className="p-3 bg-yellow-600/20 text-yellow-400 rounded-full hover:bg-yellow-600/40 transition relative shadow-lg border border-yellow-900/30"><FaCrown /></button>
-          <div className="hidden md:flex items-center gap-1 bg-gray-800/80 px-3 py-1.5 rounded-full border border-orange-500/30 shadow-lg">
+<div className="flex items-center gap-1 bg-gray-800/80 px-3 py-1.5 rounded-full border border-orange-500/30 shadow-lg ml-2">
             <FaFire className={streak > 0 ? "text-orange-500 animate-pulse" : "text-gray-600"} />
             <span className={`font-bold text-sm ${streak > 0 ? "text-orange-100" : "text-gray-500"}`}>{streak}</span>
           </div>
