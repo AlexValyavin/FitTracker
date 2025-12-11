@@ -11,6 +11,10 @@ import CalendarHeatmap from 'react-calendar-heatmap';
 import 'react-calendar-heatmap/dist/styles.css';
 import InstallBanner from './components/InstallBanner';
 
+// --- НОВАЯ БИБЛИОТЕКА ТУРА ---
+import { driver } from "driver.js";
+import "driver.js/dist/driver.css";
+
 // --- ЗВУКИ ---
 const TROPHY_ANIMATION_URL = "https://assets10.lottiefiles.com/packages/lf20_touohxv0.json";
 const CLICK_SOUND = "https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3"; 
@@ -21,7 +25,19 @@ const playSuccess = () => { const a = new Audio(SUCCESS_SOUND); a.volume = 0.4; 
 const DAYS_OF_WEEK = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 const INITIAL_QUOTES_DB = [{ text: "Боль дисциплины весит граммы, а боль сожаления — тонны." }, { text: "Результаты не приходят за одну ночь. Будь терпелив." }];
 
-// --- БАЗА УПРАЖНЕНИЙ (Для автозаполнения) ---
+// --- ШАГИ ТУРА (DRIVER.JS FORMAT) ---
+const tourSteps = [
+  { element: 'body', popover: { title: 'Привет!', description: 'Добро пожаловать в FitTracker! Давай быстро покажу, как здесь всё устроено.' } },
+  { element: '.tour-add-btn', popover: { title: 'Добавить', description: 'Нажми сюда, чтобы добавить новое упражнение.' } },
+  { element: '.tour-main-circle', popover: { title: 'Прогресс', description: 'Вводи количество повторений здесь. Нажми на цифры, чтобы изменить цель.' } },
+  { element: '.tour-quick-btns', popover: { title: 'Быстрый ввод', description: 'Кнопки для удобства. +10, +20 и т.д.' } },
+  { element: '.tour-stats-btn', popover: { title: 'Статистика', description: 'Графики, календарь активности и история.' } },
+  { element: '.tour-social-btn', popover: { title: 'Зал Славы', description: 'Соревнуйся с другими и добавляй друзей.' } },
+  { element: '.tour-streak', popover: { title: 'Огонек (Streak)', description: 'Твоя серия дней без пропусков. Не дай ему погаснуть!' } },
+  { element: '.tour-settings-btn', popover: { title: 'Настройки', description: 'Уведомления и управление аккаунтом.' } },
+];
+
+// --- БАЗА УПРАЖНЕНИЙ ---
 const EXERCISE_PRESETS = {
   "отжимания": { unit: "раз", xp: 1 },
   "приседания": { unit: "раз", xp: 1 },
@@ -88,10 +104,9 @@ function App() {
   const [quote, setQuote] = useState("Загрузка...");
   const [allQuotes, setAllQuotes] = useState([]);
   
-  // --- STATS STATE ---
   const [historyData, setHistoryData] = useState([]);
-  const [statsRange, setStatsRange] = useState('week'); // График
-  const [heatmapRange, setHeatmapRange] = useState('short'); // Календарь ('short' | 'long')
+  const [statsRange, setStatsRange] = useState('week'); 
+  const [heatmapRange, setHeatmapRange] = useState('short'); 
   const lastNotifiedMinute = useRef(null);
   
   const getCurrentRank = (xp) => RANKS.slice().reverse().find(r => xp >= r.threshold) || RANKS[0];
@@ -117,6 +132,24 @@ function App() {
       }
   }, [allQuotes]);
 
+  // --- ЗАПУСК ТУРА (Driver.js) ---
+  const startTour = useCallback(() => {
+      const driverObj = driver({
+          showProgress: true,
+          steps: tourSteps,
+          nextBtnText: 'Далее',
+          prevBtnText: 'Назад',
+          doneBtnText: 'Готово',
+          onDestroy: async () => {
+              // Когда тур закрыт или пройден
+              if (user) {
+                  await updateDoc(doc(db, 'users', user.uid), { tutorialSeen: true });
+              }
+          }
+      });
+      driverObj.drive();
+  }, [user]);
+
   // --- 2. Logic ---
   const checkDateAndReset = useCallback(async (forceUserCheck = null) => {
     const currentUser = forceUserCheck || user;
@@ -131,6 +164,13 @@ function App() {
 
     if (docSnap.exists()) {
       const data = docSnap.data();
+      
+      // Проверка на запуск тура
+      if (!data.tutorialSeen) {
+          // Небольшая задержка, чтобы UI прогрузился
+          setTimeout(() => startTour(), 1000);
+      }
+
       setTotalLifetimeCount(data.totalLifetimeCount || 0);
       setTotalXP(data.totalXP !== undefined ? data.totalXP : (data.totalLifetimeCount || 0));
 
@@ -167,13 +207,15 @@ function App() {
         totalLifetimeCount: 0,
         totalXP: 0,
         email: currentUser.email,
-        displayName: currentUser.displayName || name || "Аноним"
+        displayName: currentUser.displayName || name || "Аноним",
+        tutorialSeen: false // Новый пользователь
       };
       await setDoc(docRef, initialData);
       setExercises(initialData.exercises);
       setSettings(initialData.settings);
+      setTimeout(() => startTour(), 1000);
     }
-  }, [user, name]);
+  }, [user, name, startTour]);
 
   useEffect(() => { if (user) checkDateAndReset(); }, [user, checkDateAndReset]);
 
@@ -282,7 +324,7 @@ function App() {
 
   const triggerCelebration = () => { setShowCelebration(true); playSuccess(); setTimeout(() => setShowCelebration(false), 5000); };
   
-  // --- DELETE EXERCISE (from Settings) ---
+  // --- DELETE EXERCISE ---
   const handleDeleteExercise = async (indexToDelete) => {
     if (exercises.length <= 1) {
       alert("Нельзя удалить единственное упражнение!");
@@ -308,7 +350,7 @@ function App() {
     }
   };
 
-  // --- SMART SEARCH (FROM FIRESTORE) ---
+  // --- SMART SEARCH ---
   const handleNameChange = async (e) => {
     const val = e.target.value;
     setNewExForm(prev => ({ ...prev, name: val }));
@@ -323,7 +365,6 @@ function App() {
 
     try {
         const lowerVal = val.toLowerCase();
-        // Ищем в общей базе
         const q = query(
             collection(db, "commonExercises"),
             where("__name__", ">=", lowerVal),
@@ -348,7 +389,7 @@ function App() {
       setShowSuggestions(false);
   };
 
-  // --- ADD EXERCISE (SAVE TO DB) ---
+  // --- ADD EXERCISE ---
   const handleAddExercise = async (e) => {
     e.preventDefault(); 
     playSuccess();
@@ -366,7 +407,6 @@ function App() {
     setExercises(u); 
     if(user) await updateDoc(doc(db, 'users', user.uid), { exercises: u }); 
 
-    // Сохраняем в общую базу
     if (newExForm.name.trim().length > 2) {
         try {
             const commonRef = doc(db, "commonExercises", newExForm.name.toLowerCase().trim());
@@ -386,7 +426,23 @@ function App() {
     setDbSuggestions([]);
   };
 
-  // --- GET HEATMAP DATA (Fixes empty cells issue) ---
+  const getQuickButtons = () => {
+    const t = exercises[currentIdx].target;
+    if (t <= 15) return [1, 3, 5];
+    if (t <= 60) return [5, 10, 20];
+    return [10, 25, 50];
+  };
+
+  const getChartData = () => {
+    const days = statsRange === 'week' ? 7 : 30;
+    const sliced = historyData.slice(-days);
+    const name = selectedStatsExercise || exercises[0]?.name;
+    return sliced.map(e => {
+      const exData = e.exercises.find(ex => ex.name === name);
+      return { date: new Date(e.date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'numeric' }), count: exData ? exData.count : 0 };
+    });
+  };
+  
   const getHeatmapData = () => {
     const endDate = new Date();
     const startDate = heatmapRange === 'short' 
@@ -406,29 +462,11 @@ function App() {
         const dateKey = currentDate.toISOString().split('T')[0];
         allDays.push({
             date: dateKey,
-            count: activityMap[dateKey] || 0 // Если пусто, ставим 0, но дата сохраняется!
+            count: activityMap[dateKey] || 0
         });
         currentDate.setDate(currentDate.getDate() + 1);
     }
-    
     return allDays;
-  };
-
-  const getQuickButtons = () => {
-    const t = exercises[currentIdx].target;
-    if (t <= 15) return [1, 3, 5];
-    if (t <= 60) return [5, 10, 20];
-    return [10, 25, 50];
-  };
-
-  const getChartData = () => {
-    const days = statsRange === 'week' ? 7 : 30;
-    const sliced = historyData.slice(-days);
-    const name = selectedStatsExercise || exercises[0]?.name;
-    return sliced.map(e => {
-      const exData = e.exercises.find(ex => ex.name === name);
-      return { date: new Date(e.date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'numeric' }), count: exData ? exData.count : 0 };
-    });
   };
 
   const currentRank = getCurrentRank(totalXP);
@@ -469,28 +507,29 @@ function App() {
         )}
       </AnimatePresence>
 
+      <InstallBanner />
+
       <header className="w-full p-4 md:p-6 flex justify-between items-center z-10">
         <div className="flex gap-2 items-center">
-          <button onClick={() => { playClick(); setShowAddModal(true) }} className="p-3 bg-gray-800 rounded-full hover:bg-gray-700 transition shadow-lg border border-gray-700"><FaPlus /></button>
-          <button onClick={() => { playClick(); setShowStats(true) }} className="p-3 bg-blue-600/20 text-blue-400 rounded-full hover:bg-blue-600/40 transition shadow-lg border border-blue-900/30"><FaChartBar /></button>
-          <button onClick={() => { playClick(); setShowSocial(true) }} className="p-3 bg-yellow-600/20 text-yellow-400 rounded-full hover:bg-yellow-600/40 transition relative shadow-lg border border-yellow-900/30"><FaCrown /></button>
+          <button onClick={() => { playClick(); setShowAddModal(true) }} className="tour-add-btn p-3 bg-gray-800 rounded-full hover:bg-gray-700 transition shadow-lg border border-gray-700"><FaPlus /></button>
+          <button onClick={() => { playClick(); setShowStats(true) }} className="tour-stats-btn p-3 bg-blue-600/20 text-blue-400 rounded-full hover:bg-blue-600/40 transition shadow-lg border border-blue-900/30"><FaChartBar /></button>
+          <button onClick={() => { playClick(); setShowSocial(true) }} className="tour-social-btn p-3 bg-yellow-600/20 text-yellow-400 rounded-full hover:bg-yellow-600/40 transition relative shadow-lg border border-yellow-900/30"><FaCrown /></button>
           
-          <div className="flex items-center gap-1 bg-gray-800/80 px-3 py-1.5 rounded-full border border-orange-500/30 shadow-lg ml-1">
+          <div className="tour-streak flex items-center gap-1 bg-gray-800/80 px-3 py-1.5 rounded-full border border-orange-500/30 shadow-lg ml-1">
             <FaFire className={streak > 0 ? "text-orange-500 animate-pulse" : "text-gray-600"} />
             <span className={`font-bold text-sm ${streak > 0 ? "text-orange-100" : "text-gray-500"}`}>{streak}</span>
           </div>
         </div>
-        <button onClick={() => { playClick(); setShowSettings(true) }} className="p-3 bg-gray-800 rounded-full hover:bg-gray-700 transition shadow-lg border border-gray-700"><FaCog /></button>
+        <button onClick={() => { playClick(); setShowSettings(true) }} className="tour-settings-btn p-3 bg-gray-800 rounded-full hover:bg-gray-700 transition shadow-lg border border-gray-700"><FaCog /></button>
       </header>
 
-      <main className="flex-1 flex flex-col items-center justify-center w-full max-w-md px-4">
+      <main className="tour-main-area flex-1 flex flex-col items-center justify-center w-full max-w-md px-4">
         {/* Quote & XP Bar */}
         <div className="w-full flex flex-col items-center mb-6">
            <div className="h-8 flex items-center justify-center text-center text-gray-400 italic text-xs mb-2">
              <motion.div key={quote} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>{quote}</motion.div>
            </div>
            
-           {/* XP Progress Bar */}
            <div className="w-full bg-gray-800 h-2 rounded-full overflow-hidden mb-1 relative border border-gray-700">
               <div className="bg-yellow-500 h-full transition-all duration-1000" style={{ width: `${progressToNextRank}%` }}></div>
            </div>
@@ -501,7 +540,6 @@ function App() {
            </div>
         </div>
 
-        {/* НАВИГАЦИЯ (БЕЗ КОРЗИНЫ) */}
         <div className="flex items-center justify-between w-full mb-4 relative">
           <button disabled={currentIdx === 0} onClick={() => { playClick(); setCurrentIdx(p => p - 1) }} className={`text-2xl p-2 transition ${currentIdx === 0 ? 'text-gray-700' : 'text-white hover:scale-110'}`}><FaChevronLeft /></button>
           
@@ -515,7 +553,7 @@ function App() {
           <button disabled={currentIdx === exercises.length - 1} onClick={() => { playClick(); setCurrentIdx(p => p + 1) }} className={`text-2xl p-2 transition ${currentIdx === exercises.length - 1 ? 'text-gray-700' : 'text-white hover:scale-110'}`}><FaChevronRight /></button>
         </div>
 
-        <div className="relative flex items-center justify-center mb-8">
+        <div className="tour-main-circle relative flex items-center justify-center mb-8">
           <svg width="300" height="300" className="transform -rotate-90 drop-shadow-2xl">
             <circle cx="150" cy="150" r="120" stroke="#374151" strokeWidth="15" fill="transparent" />
             <circle cx="150" cy="150" r="120" stroke="#3B82F6" strokeWidth="15" fill="transparent" strokeDasharray={2 * Math.PI * 120} strokeDashoffset={strokeDashoffset} strokeLinecap="round" className="transition-all duration-1000 ease-out" />
@@ -558,8 +596,7 @@ function App() {
           </div>
         </div>
 
-        {/* УМНЫЕ КНОПКИ */}
-        <div className="flex gap-4">
+        <div className="tour-quick-btns flex gap-4">
           {getQuickButtons().map(n => (
              <button key={n} onClick={() => updateProgress(n)} className="px-6 py-3 bg-gray-800 rounded-2xl text-lg font-bold hover:bg-gray-700 active:scale-95 transition shadow-lg border border-gray-700">
                +{n}
@@ -613,52 +650,7 @@ function App() {
 
               <div><div className="flex justify-between items-center mb-2"><h4 className="font-bold text-gray-300">График</h4><div className="flex gap-1 text-xs bg-gray-700 rounded p-1"><button onClick={() => setStatsRange('week')} className={`px-2 py-1 rounded ${statsRange === 'week' ? 'bg-blue-600' : ''}`}>7 дн</button><button onClick={() => setStatsRange('month')} className={`px-2 py-1 rounded ${statsRange === 'month' ? 'bg-blue-600' : ''}`}>30 дн</button></div></div><div className="h-48 w-full bg-gray-800/50 rounded-lg p-2"><ResponsiveContainer width="100%" height="100%"><BarChart data={getChartData()}><CartesianGrid strokeDasharray="3 3" stroke="#374151" vertical={false} /><XAxis dataKey="date" stroke="#9CA3AF" tick={{ fontSize: 10 }} /><YAxis stroke="#9CA3AF" tick={{ fontSize: 10 }} /><Tooltip contentStyle={{ backgroundColor: '#1F2937', border: 'none', borderRadius: '8px', color: '#fff' }} cursor={{ fill: '#374151', opacity: 0.4 }} /><Bar dataKey="count" fill="#3B82F6" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></div></div>
               
-              {/* КАЛЕНДАРЬ С КРУПНЫМИ ЧИСЛАМИ */}
-              <div>
-                  <div className="flex justify-between items-center mb-2">
-                      <h4 className="font-bold text-gray-300">Активность</h4>
-                      <div className="flex gap-1 text-xs bg-gray-700 rounded p-1">
-                          <button onClick={() => setHeatmapRange('short')} className={`px-2 py-1 rounded ${heatmapRange === 'short' ? 'bg-blue-600' : ''}`}>3 мес</button>
-                          <button onClick={() => setHeatmapRange('long')} className={`px-2 py-1 rounded ${heatmapRange === 'long' ? 'bg-blue-600' : ''}`}>1 год</button>
-                      </div>
-                  </div>
-                  <div className="bg-gray-800/50 p-2 rounded-lg overflow-x-auto">
-                      <div className={heatmapRange === 'long' ? "min-w-[600px]" : "w-full"}>
-                          <CalendarHeatmap 
-                              startDate={heatmapRange === 'short' ? new Date(new Date().setMonth(new Date().getMonth() - 3)) : new Date(new Date().setFullYear(new Date().getFullYear() - 1))} 
-                              endDate={new Date()} 
-                              values={getHeatmapData()} 
-                              classForValue={(value) => { if (!value || value.count === 0) return 'color-empty'; if (value.count < 20) return 'color-scale-1'; if (value.count < 50) return 'color-scale-2'; if (value.count < 100) return 'color-scale-3'; return 'color-scale-4'; }} 
-                              showWeekdayLabels={true} 
-                              
-                              // ЧИСЛА ПОВЕРХ КВАДРАТОВ
-                              transformDayElement={(element, value, index) => {
-                                  const date = new Date(value.date);
-                                  const dayNumber = date.getDate();
-                                  const { x, y } = element.props;
-                                  const width = element.props.width || 10;
-                                  const height = element.props.height || 10;
-                                  const textColor = value.count > 0 ? 'rgba(0,0,0,0.6)' : '#4B5563';
-
-                                  return (
-                                      <g key={index}>
-                                          {element}
-                                          <text
-                                              x={x + width / 2}
-                                              y={y + height / 1.4}
-                                              textAnchor="middle"
-                                              style={{ fontSize: '5px', fill: textColor, fontWeight: '900', pointerEvents: 'none', userSelect: 'none' }}
-                                          >
-                                              {dayNumber}
-                                          </text>
-                                      </g>
-                                  );
-                              }}
-                          />
-                      </div>
-                  </div>
-              </div>
-
+              <div><h4 className="font-bold text-gray-300 mb-2">Общая активность</h4><div className="flex gap-1 text-xs bg-gray-700 rounded p-1 mb-2"><button onClick={() => setHeatmapRange('short')} className={`px-2 py-1 rounded ${heatmapRange === 'short' ? 'bg-blue-600' : ''}`}>3 мес</button><button onClick={() => setHeatmapRange('long')} className={`px-2 py-1 rounded ${heatmapRange === 'long' ? 'bg-blue-600' : ''}`}>1 год</button></div><div className="bg-gray-800/50 p-2 rounded-lg overflow-x-auto"><div className={heatmapRange === 'long' ? "min-w-[600px]" : "w-full"}><CalendarHeatmap startDate={heatmapRange === 'short' ? new Date(new Date().setMonth(new Date().getMonth() - 3)) : new Date(new Date().setFullYear(new Date().getFullYear() - 1))} endDate={new Date()} values={getHeatmapData()} classForValue={(value) => { if (!value || value.count === 0) return 'color-empty'; if (value.count < 20) return 'color-scale-1'; if (value.count < 50) return 'color-scale-2'; if (value.count < 100) return 'color-scale-3'; return 'color-scale-4'; }} showWeekdayLabels={true} transformDayElement={(element, value, index) => { const date = new Date(value.date); const dayNumber = date.getDate(); const { x, y } = element.props; const width = element.props.width || 10; const height = element.props.height || 10; const textColor = value.count > 0 ? 'rgba(0,0,0,0.6)' : '#4B5563'; return (<g key={index}>{element}<text x={x + width / 2} y={y + height / 1.4} textAnchor="middle" style={{ fontSize: '5px', fill: textColor, fontWeight: '900', pointerEvents: 'none', userSelect: 'none' }}>{dayNumber}</text></g>); }} /></div></div></div>
             </div>
           </Modal>
         )}
@@ -667,79 +659,12 @@ function App() {
         {showAddModal && (
           <Modal onClose={() => setShowAddModal(false)} title="Новое упражнение">
             <form onSubmit={handleAddExercise} className="flex flex-col gap-4 relative">
-              
-              {/* Поле Названия + Выпадающий список */}
               <div className="relative">
-                  <input 
-                    name="name" 
-                    value={newExForm.name}
-                    onChange={(e) => { handleNameChange(e); setShowSuggestions(true); }}
-                    onFocus={() => setShowSuggestions(true)}
-                    autoComplete="off" 
-                    placeholder="Название (начни вводить 'Планка'...)" 
-                    className="w-full bg-gray-700 p-3 rounded text-white outline-none focus:ring-2 focus:ring-blue-500" 
-                    required 
-                  />
-                  
-                  {/* Красивый список подсказок ИЗ БАЗЫ */}
-                  {showSuggestions && dbSuggestions.length > 0 && (
-                      <ul className="absolute z-50 w-full bg-gray-800 border border-gray-600 rounded-b-lg shadow-xl max-h-40 overflow-y-auto mt-1">
-                          {dbSuggestions.map((preset, idx) => (
-                                <li 
-                                    key={idx} 
-                                    onClick={() => selectPreset(preset)}
-                                    className="p-3 hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-0 flex justify-between items-center"
-                                >
-                                    <span className="capitalize font-bold text-white">{preset.name}</span>
-                                    <span className="text-xs text-blue-300 bg-blue-900/30 px-2 py-1 rounded">
-                                        {preset.unit}, {preset.xp} XP
-                                    </span>
-                                </li>
-                             ))
-                          }
-                      </ul>
-                  )}
-                  {/* Подложка */}
+                  <input name="name" value={newExForm.name} onChange={(e) => { handleNameChange(e); setShowSuggestions(true); }} onFocus={() => setShowSuggestions(true)} autoComplete="off" placeholder="Название (начни вводить 'Планка'...)" className="w-full bg-gray-700 p-3 rounded text-white outline-none focus:ring-2 focus:ring-blue-500" required />
+                  {showSuggestions && dbSuggestions.length > 0 && (<ul className="absolute z-50 w-full bg-gray-800 border border-gray-600 rounded-b-lg shadow-xl max-h-40 overflow-y-auto mt-1">{dbSuggestions.map((preset, idx) => (<li key={idx} onClick={() => selectPreset(preset)} className="p-3 hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-0 flex justify-between items-center"><span className="capitalize font-bold text-white">{preset.name}</span><span className="text-xs text-blue-300 bg-blue-900/30 px-2 py-1 rounded">{preset.unit}, {preset.xp} XP</span></li>))}</ul>)}
                   {showSuggestions && <div className="fixed inset-0 z-40" onClick={() => setShowSuggestions(false)}></div>}
               </div>
-
-              <div className="flex gap-2 relative z-0">
-                 <input 
-                    name="target" 
-                    type="number" 
-                    value={newExForm.target}
-                    onChange={e => setNewExForm({...newExForm, target: e.target.value})}
-                    placeholder="Цель" 
-                    className="bg-gray-700 p-3 rounded text-white outline-none focus:ring-2 focus:ring-blue-500 w-1/3" 
-                    required 
-                 />
-                 
-                 <select 
-                    name="unit" 
-                    value={newExForm.unit}
-                    onChange={e => setNewExForm({...newExForm, unit: e.target.value})}
-                    className="bg-gray-700 p-3 rounded text-white outline-none focus:ring-2 focus:ring-blue-500 w-1/3"
-                 >
-                    <option value="раз">раз</option>
-                    <option value="сек">сек</option>
-                    <option value="мин">мин</option>
-                    <option value="км">км</option>
-                    <option value="кг">кг</option>
-                 </select>
-
-                 <input 
-                    name="xp" 
-                    type="number" 
-                    step="0.1" 
-                    value={newExForm.xp}
-                    onChange={e => setNewExForm({...newExForm, xp: e.target.value})}
-                    placeholder="XP" 
-                    className="bg-gray-700 p-3 rounded text-white outline-none focus:ring-2 focus:ring-blue-500 w-1/3" 
-                    required 
-                 />
-              </div>
-              <p className="text-xs text-gray-400">Совет: 1 отжимание = 1 XP, 1 мин планки = 5 XP</p>
-              <button className="bg-blue-600 py-3 rounded font-bold hover:bg-blue-500 shadow-md relative z-0">Добавить</button>
+              <div className="flex gap-2 relative z-0"><input name="target" type="number" value={newExForm.target} onChange={e => setNewExForm({...newExForm, target: e.target.value})} placeholder="Цель" className="bg-gray-700 p-3 rounded text-white outline-none focus:ring-2 focus:ring-blue-500 w-1/3" required /><select name="unit" value={newExForm.unit} onChange={e => setNewExForm({...newExForm, unit: e.target.value})} className="bg-gray-700 p-3 rounded text-white outline-none focus:ring-2 focus:ring-blue-500 w-1/3"><option value="раз">раз</option><option value="сек">сек</option><option value="мин">мин</option><option value="км">км</option><option value="кг">кг</option></select><input name="xp" type="number" step="0.1" value={newExForm.xp} onChange={e => setNewExForm({...newExForm, xp: e.target.value})} placeholder="XP" className="bg-gray-700 p-3 rounded text-white outline-none focus:ring-2 focus:ring-blue-500 w-1/3" required /></div><p className="text-xs text-gray-400">Совет: 1 отжимание = 1 XP, 1 мин планки = 5 XP</p><button className="bg-blue-600 py-3 rounded font-bold hover:bg-blue-500 shadow-md relative z-0">Добавить</button>
             </form>
           </Modal>
         )}
@@ -748,24 +673,7 @@ function App() {
         {showSettings && (
           <Modal onClose={() => setShowSettings(false)} title="Настройки">
             <div className="flex flex-col gap-4 max-h-[70vh] overflow-y-auto custom-scrollbar pr-1">
-              
-              {/* БЛОК УДАЛЕНИЯ УПРАЖНЕНИЙ */}
-              <div className="bg-gray-700/30 p-3 rounded-lg border border-gray-600">
-                  <h4 className="text-xs text-gray-400 uppercase font-bold mb-2">Мои упражнения</h4>
-                  <div className="flex flex-col gap-2">
-                      {exercises.map((ex, idx) => (
-                          <div key={idx} className="flex justify-between items-center bg-gray-800 p-2 rounded text-sm">
-                              <span>{ex.name}</span>
-                              {exercises.length > 1 && (
-                                  <button onClick={() => handleDeleteExercise(idx)} className="text-red-400 hover:text-red-300 p-1">
-                                      <FaTrash />
-                                  </button>
-                              )}
-                          </div>
-                      ))}
-                  </div>
-              </div>
-
+              <div className="bg-gray-700/30 p-3 rounded-lg border border-gray-600"><h4 className="text-xs text-gray-400 uppercase font-bold mb-2">Мои упражнения</h4><div className="flex flex-col gap-2">{exercises.map((ex, idx) => (<div key={idx} className="flex justify-between items-center bg-gray-800 p-2 rounded text-sm"><span>{ex.name}</span>{exercises.length > 1 && (<button onClick={() => handleDeleteExercise(idx)} className="text-red-400 hover:text-red-300 p-1"><FaTrash /></button>)}</div>))}</div></div>
               <button onClick={() => { playClick(); if (window.confirm("Обновить?")) { const b = writeBatch(db); INITIAL_QUOTES_DB.forEach(q => b.set(doc(collection(db, "quotes")), q)); b.commit(); window.location.reload(); } }} className="flex justify-between items-center bg-gray-700 p-3 rounded hover:bg-gray-600"><span className="text-sm">Сброс цитат</span><FaCloudUploadAlt /></button>
               <div className="flex justify-between items-center pt-2 border-t border-gray-700"><span className="font-bold">Уведомления</span><input type="checkbox" checked={settings.notify} onChange={e => { playClick(); if (e.target.checked && Notification.permission !== 'granted') Notification.requestPermission(); const s = { ...settings, notify: e.target.checked }; setSettings(s); updateDoc(doc(db, 'users', user.uid), { settings: s }) }} className="w-5 h-5 accent-blue-600" /></div>
               {settings.notify && (<div className="bg-gray-700/50 p-3 rounded flex flex-col gap-2">{settings.times.map((t, i) => <div key={i} className="flex gap-2"><input type="time" value={t} onChange={e => { const n = [...settings.times]; n[i] = e.target.value; const s = { ...settings, times: n }; setSettings(s); updateDoc(doc(db, 'users', user.uid), { settings: s }) }} className="bg-gray-700 p-1 rounded text-white w-full" /></div>)}<button onClick={() => { playClick(); const s = { ...settings, times: [...settings.times, '12:00'] }; setSettings(s); updateDoc(doc(db, 'users', user.uid), { settings: s }) }} className="text-blue-400 text-xs flex items-center gap-1 mt-1"><FaPlus /> Добавить время</button></div>)}
@@ -775,7 +683,6 @@ function App() {
           </Modal>
         )}
       </AnimatePresence>
-	        <InstallBanner />
     </div>
   );
 }
