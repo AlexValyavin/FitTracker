@@ -5,13 +5,13 @@ import { doc, getDoc, setDoc, updateDoc, collection, getDocs, writeBatch, query,
 import { motion, AnimatePresence } from 'framer-motion';
 import Confetti from 'react-confetti';
 import Lottie from "lottie-react";
-import { FaCog, FaPlus, FaSignOutAlt, FaChevronRight, FaChevronLeft, FaPen, FaTrash, FaCloudUploadAlt, FaChartBar, FaFire, FaTrophy, FaUserFriends, FaCrown, FaSearch, FaGoogle, FaEnvelope, FaLock, FaUser } from 'react-icons/fa';
+import { FaCog, FaPlus, FaSignOutAlt, FaChevronRight, FaChevronLeft, FaPen, FaTrash, FaCloudUploadAlt, FaChartBar, FaFire, FaTrophy, FaUserFriends, FaCrown, FaSearch, FaGoogle, FaEnvelope, FaLock, FaUser, FaShareAlt, FaCheck } from 'react-icons/fa';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import CalendarHeatmap from 'react-calendar-heatmap';
 import 'react-calendar-heatmap/dist/styles.css';
 import InstallBanner from './components/InstallBanner';
 
-// --- НОВАЯ БИБЛИОТЕКА ТУРА ---
+// --- БИБЛИОТЕКА ТУРА ---
 import { driver } from "driver.js";
 import "driver.js/dist/driver.css";
 
@@ -25,7 +25,16 @@ const playSuccess = () => { const a = new Audio(SUCCESS_SOUND); a.volume = 0.4; 
 const DAYS_OF_WEEK = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 const INITIAL_QUOTES_DB = [{ text: "Боль дисциплины весит граммы, а боль сожаления — тонны." }, { text: "Результаты не приходят за одну ночь. Будь терпелив." }];
 
-// --- ШАГИ ТУРА (DRIVER.JS FORMAT) ---
+// --- ТЕКСТЫ ДЛЯ ПРИГЛАШЕНИЙ (Новое) ---
+const INVITE_MESSAGES = [
+  "🔥 Давай соревноваться в FitTracker! Сможешь обогнать меня по XP?",
+  "💪 Я начал тренироваться. Присоединяйся, вместе веселее!",
+  "🏆 Слабо догнать меня в рейтинге? Залетай в FitTracker!",
+  "🚀 Качаем дисциплину вместе. Переходи по ссылке и добавляйся в друзья!",
+  "👀 Следи за моим прогрессом и показывай свой. Кто кого?"
+];
+
+// --- ТУР ---
 const tourSteps = [
   { element: 'body', popover: { title: 'Привет!', description: 'Добро пожаловать в FitTracker! Давай быстро покажу, как здесь всё устроено.' } },
   { element: '.tour-add-btn', popover: { title: 'Добавить', description: 'Нажми сюда, чтобы добавить новое упражнение.' } },
@@ -36,19 +45,6 @@ const tourSteps = [
   { element: '.tour-streak', popover: { title: 'Огонек (Streak)', description: 'Твоя серия дней без пропусков. Не дай ему погаснуть!' } },
   { element: '.tour-settings-btn', popover: { title: 'Настройки', description: 'Уведомления и управление аккаунтом.' } },
 ];
-
-// --- БАЗА УПРАЖНЕНИЙ ---
-const EXERCISE_PRESETS = {
-  "отжимания": { unit: "раз", xp: 1 },
-  "приседания": { unit: "раз", xp: 1 },
-  "подтягивания": { unit: "раз", xp: 3 },
-  "планка": { unit: "сек", xp: 0.2 },
-  "бег": { unit: "км", xp: 10 },
-  "пресс": { unit: "раз", xp: 1.5 },
-  "скакалка": { unit: "раз", xp: 0.1 },
-  "бёрпи": { unit: "раз", xp: 2 },
-  "медитация": { unit: "мин", xp: 5 },
-};
 
 const RANKS = [
   { name: "Новичок", threshold: 0 }, 
@@ -98,6 +94,7 @@ function App() {
   const [friendsList, setFriendsList] = useState([]);
   const [friendEmailInput, setFriendEmailInput] = useState("");
   const [friendSearchStatus, setFriendSearchStatus] = useState("");
+  const [copySuccess, setCopySuccess] = useState(false);
   
   const [trophyData, setTrophyData] = useState(null);
   const [settings, setSettings] = useState({ notify: false, times: ['10:00'], days: [] });
@@ -132,7 +129,57 @@ function App() {
       }
   }, [allQuotes]);
 
-  // --- ЗАПУСК ТУРА (Driver.js) ---
+  // --- INVITE SYSTEM (SHARE LINK) ---
+  useEffect(() => {
+    if (!user) return; 
+
+    const params = new URLSearchParams(window.location.search);
+    const inviteId = params.get('invite');
+
+    if (inviteId) {
+      const handleInvite = async () => {
+        if (inviteId === user.uid) return; 
+
+        await updateDoc(doc(db, "users", user.uid), { 
+            friends: arrayUnion(inviteId) 
+        });
+        
+        alert("Вы добавили друга по ссылке! 🎉");
+        window.history.replaceState({}, document.title, window.location.pathname);
+        setShowSocial(true);
+      };
+      handleInvite();
+    }
+  }, [user]);
+
+  // --- ОБНОВЛЕННАЯ ФУНКЦИЯ ПОДЕЛИТЬСЯ ---
+  const handleShareProfile = async () => {
+    playClick();
+    
+    const url = `${window.location.origin}${window.location.pathname}?invite=${user.uid}`;
+    const randomMsg = INVITE_MESSAGES[Math.floor(Math.random() * INVITE_MESSAGES.length)];
+    const fullText = `${randomMsg}\n\n👉 ${url}`;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'FitTracker Invite',
+          text: randomMsg,
+          url: url
+        });
+        return;
+      } catch (err) {
+        console.log('Share canceled', err);
+      }
+    }
+
+    navigator.clipboard.writeText(fullText).then(() => {
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    });
+  };
+
+  // --- TOUR START ---
   const startTour = useCallback(() => {
       const driverObj = driver({
           showProgress: true,
@@ -141,7 +188,6 @@ function App() {
           prevBtnText: 'Назад',
           doneBtnText: 'Готово',
           onDestroy: async () => {
-              // Когда тур закрыт или пройден
               if (user) {
                   await updateDoc(doc(db, 'users', user.uid), { tutorialSeen: true });
               }
@@ -150,7 +196,7 @@ function App() {
       driverObj.drive();
   }, [user]);
 
-  // --- 2. Logic ---
+  // --- 2. Logic (Sync & Reset) ---
   const checkDateAndReset = useCallback(async (forceUserCheck = null) => {
     const currentUser = forceUserCheck || user;
     if (!currentUser) return;
@@ -165,9 +211,7 @@ function App() {
     if (docSnap.exists()) {
       const data = docSnap.data();
       
-      // Проверка на запуск тура
       if (!data.tutorialSeen) {
-          // Небольшая задержка, чтобы UI прогрузился
           setTimeout(() => startTour(), 1000);
       }
 
@@ -208,7 +252,7 @@ function App() {
         totalXP: 0,
         email: currentUser.email,
         displayName: currentUser.displayName || name || "Аноним",
-        tutorialSeen: false // Новый пользователь
+        tutorialSeen: false 
       };
       await setDoc(docRef, initialData);
       setExercises(initialData.exercises);
@@ -219,12 +263,12 @@ function App() {
 
   useEffect(() => { if (user) checkDateAndReset(); }, [user, checkDateAndReset]);
 
-  // --- Auth Handlers ---
+  // --- Handlers ---
   const handleLogin = async (e) => { e.preventDefault(); setAuthError(''); try { await logInWithEmail(email, password); } catch (err) { setAuthError(err.message); } };
   const handleRegister = async (e) => { e.preventDefault(); setAuthError(''); try { const res = await registerWithEmail(email, password); await updateUserProfile(res.user, name); } catch (err) { setAuthError(err.message); } };
   const handleResetPassword = async (e) => { e.preventDefault(); setAuthError(''); setResetSent(false); try { await sendPasswordReset(email); setResetSent(true); } catch (err) { setAuthError(err.message); } };
 
-  // --- Stats & Leaderboard ---
+  // --- Fetch Data ---
   const fetchHistory = useCallback(async () => {
     if (!user) return;
     const historyRef = collection(db, `users/${user.uid}/history`);
@@ -324,7 +368,6 @@ function App() {
 
   const triggerCelebration = () => { setShowCelebration(true); playSuccess(); setTimeout(() => setShowCelebration(false), 5000); };
   
-  // --- DELETE EXERCISE ---
   const handleDeleteExercise = async (indexToDelete) => {
     if (exercises.length <= 1) {
       alert("Нельзя удалить единственное упражнение!");
@@ -350,7 +393,6 @@ function App() {
     }
   };
 
-  // --- SMART SEARCH ---
   const handleNameChange = async (e) => {
     const val = e.target.value;
     setNewExForm(prev => ({ ...prev, name: val }));
@@ -389,7 +431,6 @@ function App() {
       setShowSuggestions(false);
   };
 
-  // --- ADD EXERCISE ---
   const handleAddExercise = async (e) => {
     e.preventDefault(); 
     playSuccess();
@@ -426,23 +467,6 @@ function App() {
     setDbSuggestions([]);
   };
 
-  const getQuickButtons = () => {
-    const t = exercises[currentIdx].target;
-    if (t <= 15) return [1, 3, 5];
-    if (t <= 60) return [5, 10, 20];
-    return [10, 25, 50];
-  };
-
-  const getChartData = () => {
-    const days = statsRange === 'week' ? 7 : 30;
-    const sliced = historyData.slice(-days);
-    const name = selectedStatsExercise || exercises[0]?.name;
-    return sliced.map(e => {
-      const exData = e.exercises.find(ex => ex.name === name);
-      return { date: new Date(e.date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'numeric' }), count: exData ? exData.count : 0 };
-    });
-  };
-  
   const getHeatmapData = () => {
     const endDate = new Date();
     const startDate = heatmapRange === 'short' 
@@ -466,7 +490,25 @@ function App() {
         });
         currentDate.setDate(currentDate.getDate() + 1);
     }
+    
     return allDays;
+  };
+
+  const getQuickButtons = () => {
+    const t = exercises[currentIdx].target;
+    if (t <= 15) return [1, 3, 5];
+    if (t <= 60) return [5, 10, 20];
+    return [10, 25, 50];
+  };
+
+  const getChartData = () => {
+    const days = statsRange === 'week' ? 7 : 30;
+    const sliced = historyData.slice(-days);
+    const name = selectedStatsExercise || exercises[0]?.name;
+    return sliced.map(e => {
+      const exData = e.exercises.find(ex => ex.name === name);
+      return { date: new Date(e.date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'numeric' }), count: exData ? exData.count : 0 };
+    });
   };
 
   const currentRank = getCurrentRank(totalXP);
@@ -628,7 +670,18 @@ function App() {
                 </div>
               </div>
               <div>
-                <h4 className="font-bold text-blue-400 mb-2 flex items-center gap-2"><FaUserFriends /> Друзья</h4>
+                {/* ЗАГОЛОВОК С КНОПКОЙ ПОДЕЛИТЬСЯ */}
+                <div className="flex justify-between items-center mb-2">
+                    <h4 className="font-bold text-blue-400 flex items-center gap-2"><FaUserFriends /> Друзья</h4>
+                    <button 
+                      onClick={handleShareProfile}
+                      className={`text-xs px-3 py-1 rounded flex items-center gap-2 transition ${copySuccess ? 'bg-green-600 text-white' : 'bg-blue-600 text-white hover:bg-blue-500'}`}
+                    >
+                      {copySuccess ? <FaCheck /> : <FaShareAlt />}
+                      {copySuccess ? 'Скопировано!' : 'Пригласить'}
+                    </button>
+                </div>
+
                 <div className="flex gap-2 mb-4"><input value={friendEmailInput} onChange={e=>setFriendEmailInput(e.target.value)} placeholder="Email друга" className="bg-gray-700 p-2 rounded text-sm w-full outline-none"/><button onClick={()=>{playClick();addFriend()}} className="bg-blue-600 p-2 rounded text-white"><FaSearch/></button></div>
                 {friendSearchStatus && <p className="text-xs text-gray-400 mb-2">{friendSearchStatus}</p>}
                 <div className="flex flex-col gap-2">{friendsList.map((f,i)=><div key={i} className="bg-gray-700/50 p-3 rounded-lg flex justify-between items-center"><div><p className="font-bold text-sm">{f.displayName}</p><p className="text-xs text-gray-400">{f.email}</p></div><div className="text-right"><p className="font-bold text-white text-xs bg-yellow-900/30 px-2 py-0.5 rounded border border-yellow-900/50 mb-1">{f.totalXP ? Math.floor(f.totalXP) : 0} XP</p><p className="text-xs text-green-400">Сегодня: {f.exercises?f.exercises.reduce((a,c)=>a+(c.count||0),0):0}</p></div></div>)}</div>
@@ -683,6 +736,8 @@ function App() {
           </Modal>
         )}
       </AnimatePresence>
+
+      <InstallBanner />
     </div>
   );
 }
