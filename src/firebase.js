@@ -9,7 +9,13 @@ import {
   sendPasswordResetEmail,         // Новое: Сброс пароля
   updateProfile                   // Новое: Обновление имени
 } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { getFirestore,
+enableIndexedDbPersistence, // Импортируем функцию оффлайна
+  doc, 
+  setDoc, 
+  getDoc, 
+  updateDoc, 
+  arrayUnion } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAU4-3U_-f9X4kDht2cV2ujyxLtv6xepQw",
@@ -25,6 +31,15 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const provider = new GoogleAuthProvider();
+
+// --- ВКЛЮЧАЕМ ОФФЛАЙН РЕЖИМ ---
+enableIndexedDbPersistence(db).catch((err) => {
+  if (err.code == 'failed-precondition') {
+      console.log('Оффлайн не работает: открыто слишком много вкладок');
+  } else if (err.code == 'unimplemented') {
+      console.log('Браузер не поддерживает оффлайн');
+  }
+});
 
 // Экспортируем функции
 export const signInWithGoogle = () => signInWithPopup(auth, provider);

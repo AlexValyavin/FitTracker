@@ -9,6 +9,7 @@ import { FaCog, FaPlus, FaSignOutAlt, FaChevronRight, FaChevronLeft, FaPen, FaTr
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import CalendarHeatmap from 'react-calendar-heatmap';
 import 'react-calendar-heatmap/dist/styles.css';
+import InstallBanner from './components/InstallBanner';
 
 // --- ЗВУКИ ---
 const TROPHY_ANIMATION_URL = "https://assets10.lottiefiles.com/packages/lf20_touohxv0.json";
@@ -774,6 +775,7 @@ function App() {
           </Modal>
         )}
       </AnimatePresence>
+	        <InstallBanner />
     </div>
   );
 }
